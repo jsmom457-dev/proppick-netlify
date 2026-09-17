@@ -204,6 +204,57 @@ function validateRenderRequest(body) {
   return null;
 }
 
+function normalizeRequestBody(body) {
+  // 이미 정상 JSON 객체라면 그대로 사용
+  if (
+    body &&
+    typeof body === "object" &&
+    !Buffer.isBuffer(body) &&
+    !Array.isArray(body) &&
+    body.project
+  ) {
+    return body;
+  }
+
+  try {
+    // 문자열
+    if (typeof body === "string") {
+      return JSON.parse(body);
+    }
+
+    // Buffer
+    if (Buffer.isBuffer(body)) {
+      return JSON.parse(body.toString("utf8"));
+    }
+
+    // Netlify/serverless-http에서
+    // {"0":123,"1":34,...} 형태가 된 Buffer
+    if (
+      body &&
+      typeof body === "object" &&
+      Object.keys(body).every((key) =>
+        /^\d+$/.test(key)
+      )
+    ) {
+      const bytes = Object.keys(body)
+        .sort((a, b) => Number(a) - Number(b))
+        .map((key) => body[key]);
+
+      const jsonString =
+        Buffer.from(bytes).toString("utf8");
+
+      return JSON.parse(jsonString);
+    }
+  } catch (error) {
+    console.error(
+      "[Request Body] JSON normalization failed:",
+      error
+    );
+  }
+
+  return body;
+}
+
 app.post("/api/render-stage", async (req, res) => {
   console.log("\n========== RENDER REQUEST DEBUG ==========");
 console.log("method:", req.method);
@@ -404,50 +455,153 @@ async function generateAssetView({ categoryId, keywords, assetPlan, view }) {
   return { view, prompt, base64 };
 }
 
-app.post("/api/assets/generate-category", async (req, res) => {
-  const validationError = validateAssetRequest(req.body);
-  if (validationError) return res.status(400).json({ error: validationError });
+app.post("/api/render-stage", async (req, res) => {
+  // Netlify/serverless-http에서 숫자 key 객체로 들어온 body를
+  // 정상적인 JSON 객체로 복구
+  req.body = normalizeRequestBody(req.body);
 
-  const { projectId, categoryId, keywords } = req.body;
+  console.log("\n========== RENDER REQUEST DEBUG ==========");
+  console.log("method:", req.method);
+  console.log("content-type:", req.headers["content-type"]);
+  console.log("body type:", typeof req.body);
+  console.log("body keys:", Object.keys(req.body || {}));
+  console.log("project:", Boolean(req.body?.project));
+  console.log("settings:", Boolean(req.body?.settings));
+  console.log("objects:", Array.isArray(req.body?.objects));
+  console.log("images:", Boolean(req.body?.images));
+  console.log(
+    "compositionImage type:",
+    typeof req.body?.images?.compositionImage
+  );
+  console.log(
+    "stageTypeImage type:",
+    typeof req.body?.images?.stageTypeImage
+  );
+  console.log("==========================================\n");
+
+  const validationError = validateRenderRequest(req.body);
+
+  if (validationError) {
+    console.error("[Render Validation]", validationError);
+
+    return res.status(400).json({
+      error: validationError,
+    });
+  }
+
+  const {
+    project = {},
+    settings = {},
+    objects = [],
+    images = {},
+  } = req.body;
+
+  console.log("\n========== ARTIST DEBUG ==========");
+  console.log("settings 전체:", settings);
+  console.log("artistCount:", settings.artistCount);
+  console.log("artistCount 타입:", typeof settings.artistCount);
+  console.log("==================================\n");
+
+  const referenceImages = Array.isArray(images.referenceImages)
+    ? images.referenceImages.filter(Boolean)
+    : [];
 
   try {
-    const assetPlans = await createAssetPlan({ categoryId, keywords });
-    const assetGroups = [];
+    console.log(
+      "[AI Render] artistCount received:",
+      settings.artistCount ?? null
+    );
 
-    for (const assetPlan of assetPlans) {
-      const [front, perspective] = await Promise.all([
-        generateAssetView({ categoryId, keywords, assetPlan, view: "front" }),
-        generateAssetView({ categoryId, keywords, assetPlan, view: "perspective" }),
-      ]);
+    const frontPrompt = buildFrontPrompt({
+      project,
+      settings,
+      objects,
+      referenceCount: referenceImages.length,
+    });
 
-      assetGroups.push({
-        id: `asset-group-${categoryId}-${Date.now()}-${assetPlan.id}`,
-        projectId,
-        categoryId,
-        categoryName: getCategoryName(categoryId),
-        name: assetPlan.name,
-        koreanName: assetPlan.koreanName,
-        description: assetPlan.description,
-        keywords,
-        views: {
-          front: { base64: front.base64, prompt: front.prompt },
-          perspective: { base64: perspective.base64, prompt: perspective.prompt },
-        },
-        createdAt: new Date().toISOString(),
-      });
-    }
+    console.log("\n========== FRONT PROMPT DEBUG ==========");
+    console.log("artistCount:", settings.artistCount);
+    console.log(frontPrompt);
+    console.log("========================================\n");
+
+    const front = await generateEditedImage({
+      prompt: frontPrompt,
+      resultName: "front",
+      imageDataUrls: [
+        images.compositionImage,
+        images.stageTypeImage,
+        ...referenceImages,
+      ],
+    });
+
+    // Front를 기준 디자인으로 사용
+    const sidePrompt = buildSidePrompt({
+      project,
+      settings,
+      objects,
+      referenceCount: referenceImages.length,
+    });
+
+    const topPrompt = buildTopPrompt({
+      project,
+      settings,
+      objects,
+      referenceCount: referenceImages.length,
+    });
+
+    const [side, top] = await Promise.all([
+      generateEditedImage({
+        prompt: sidePrompt,
+        resultName: "side",
+        imageDataUrls: [
+          front,
+          images.compositionImage,
+          images.stageTypeImage,
+          ...referenceImages,
+        ],
+      }),
+
+      generateEditedImage({
+        prompt: topPrompt,
+        resultName: "top",
+        imageDataUrls: [
+          front,
+          images.compositionImage,
+          images.stageTypeImage,
+          ...referenceImages,
+        ],
+      }),
+    ]);
 
     return res.status(201).json({
-      categoryId,
-      assetTypeCount: assetGroups.length,
-      imageCount: assetGroups.length * 2,
-      assets: assetGroups,
+      results: {
+        front,
+        side,
+        top,
+      },
+
+      prompts: {
+        front: frontPrompt,
+        side: sidePrompt,
+        top: topPrompt,
+      },
+
+      generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Asset generation error:", error);
-    return res.status(typeof error.status === "number" ? error.status : 500).json({
-      error: error?.message || "카테고리 소품 생성 중 오류가 발생했습니다.",
-    });
+    console.error("Stage render error:", error);
+
+    return res
+      .status(
+        typeof error.status === "number"
+          ? error.status
+          : 500
+      )
+      .json({
+        error:
+          error?.message ||
+          "AI 무대 렌더링 중 오류가 발생했습니다.",
+      });
   }
 });
 
