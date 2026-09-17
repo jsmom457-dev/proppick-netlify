@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI, { toFile } from "openai";
-import { fileURLToPath } from "node:url";
 
 import {
   buildAssetPlanningPrompt,
@@ -16,10 +15,8 @@ import {
   buildTopPrompt,
 } from "./promptBuilder.js";
 
-// Always load the root .env even when the server is launched from /server.
-dotenv.config({
-  path: fileURLToPath(new URL("../.env", import.meta.url)),
-});
+dotenv.config();
+
 
 const app = express();
 const PORT = Number(process.env.SERVER_PORT || 3001);
