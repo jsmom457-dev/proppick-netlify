@@ -205,78 +205,197 @@ function validateRenderRequest(body) {
 }
 
 function normalizeRequestBody(body) {
-  // 이미 정상 JSON 객체라면 그대로 사용
-  if (
-    body &&
-    typeof body === "object" &&
-    !Buffer.isBuffer(body) &&
-    !Array.isArray(body) &&
-    body.project
-  ) {
-    return body;
-  }
-
   try {
-    // 문자열
-    if (typeof body === "string") {
-      return JSON.parse(body);
-    }
-
-    // Buffer
-    if (Buffer.isBuffer(body)) {
-      return JSON.parse(body.toString("utf8"));
-    }
-
-    // Netlify/serverless-http에서
-    // {"0":123,"1":34,...} 형태가 된 Buffer
+    // 1. 이미 정상적인 JSON 객체
     if (
       body &&
       typeof body === "object" &&
-      Object.keys(body).every((key) =>
-        /^\d+$/.test(key)
-      )
+      !Buffer.isBuffer(body) &&
+      !Array.isArray(body) &&
+      body.project
     ) {
-      const bytes = Object.keys(body)
-        .sort((a, b) => Number(a) - Number(b))
-        .map((key) => body[key]);
-
-      const jsonString =
-        Buffer.from(bytes).toString("utf8");
-
-      return JSON.parse(jsonString);
+      console.log("[Body Normalize] already normal JSON");
+      return body;
     }
+
+    // 2. 일반 문자열
+    if (typeof body === "string") {
+      console.log("[Body Normalize] parsing string");
+
+      return JSON.parse(body);
+    }
+
+    // 3. Node Buffer
+    if (Buffer.isBuffer(body)) {
+      console.log("[Body Normalize] parsing Buffer");
+
+      const text = body.toString("utf8");
+
+      return JSON.parse(text);
+    }
+
+    // 4. Uint8Array
+    if (body instanceof Uint8Array) {
+      console.log("[Body Normalize] parsing Uint8Array");
+
+      const text = Buffer.from(body).toString("utf8");
+
+      return JSON.parse(text);
+    }
+
+    // 5. Netlify/serverless-http가 만든
+    // { "0": ..., "1": ..., "2": ... } 형태
+    if (
+      body &&
+      typeof body === "object" &&
+      !Array.isArray(body)
+    ) {
+      const keys = Object.keys(body);
+
+      const numericKeys =
+        keys.length > 0 &&
+        keys.every((key) => /^\d+$/.test(key));
+
+      if (numericKeys) {
+        console.log(
+          "[Body Normalize] numeric-key body detected:",
+          keys.length
+        );
+
+        const sortedKeys = keys.sort(
+          (a, b) => Number(a) - Number(b)
+        );
+
+        const values = sortedKeys.map(
+          (key) => body[key]
+        );
+
+        console.log(
+          "[Body Normalize] first value type:",
+          typeof values[0]
+        );
+
+        console.log(
+          "[Body Normalize] first values:",
+          values.slice(0, 20)
+        );
+
+        let text = "";
+
+        // 값이 byte 숫자인 경우
+        if (
+          values.every(
+            (value) =>
+              typeof value === "number" &&
+              Number.isFinite(value)
+          )
+        ) {
+          text = Buffer.from(values).toString("utf8");
+        }
+
+        // 값이 문자열인 경우
+        else if (
+          values.every(
+            (value) => typeof value === "string"
+          )
+        ) {
+          // "123", "34" 같은 byte 문자열인지 확인
+          const allByteStrings = values.every(
+            (value) =>
+              /^\d+$/.test(value) &&
+              Number(value) >= 0 &&
+              Number(value) <= 255
+          );
+
+          if (allByteStrings) {
+            text = Buffer.from(
+              values.map(Number)
+            ).toString("utf8");
+          } else {
+            // "{", "\"", "p", "r"...처럼
+            // 문자 단위로 쪼개진 경우
+            text = values.join("");
+          }
+        }
+
+        // { type: "Buffer", data: [...] } 같은 값이 섞인 경우
+        else {
+          text = values
+            .map((value) => {
+              if (typeof value === "number") {
+                return String.fromCharCode(value);
+              }
+
+              return String(value ?? "");
+            })
+            .join("");
+        }
+
+        console.log(
+          "[Body Normalize] reconstructed length:",
+          text.length
+        );
+
+        console.log(
+          "[Body Normalize] preview:",
+          text.slice(0, 200)
+        );
+
+        const parsed = JSON.parse(text);
+
+        console.log(
+          "[Body Normalize] SUCCESS:",
+          Object.keys(parsed)
+        );
+
+        return parsed;
+      }
+    }
+
+    console.warn(
+      "[Body Normalize] unsupported body format"
+    );
+
+    return body;
   } catch (error) {
     console.error(
-      "[Request Body] JSON normalization failed:",
+      "[Body Normalize] FAILED:",
       error
     );
-  }
 
-  return body;
+    return body;
+  }
 }
 
-app.post("/api/render-stage", async (req, res) => {
+aapp.post("/api/render-stage", async (req, res) => {
+  // Netlify에서 숫자 key 객체로 들어온 body를 정상 JSON으로 복구
+  req.body = normalizeRequestBody(req.body);
+
   console.log("\n========== RENDER REQUEST DEBUG ==========");
-console.log("method:", req.method);
-console.log("content-type:", req.headers["content-type"]);
-console.log("body type:", typeof req.body);
-console.log("body keys:", Object.keys(req.body || {}));
-console.log("project:", Boolean(req.body?.project));
-console.log("settings:", Boolean(req.body?.settings));
-console.log("objects:", Array.isArray(req.body?.objects));
-console.log("images:", Boolean(req.body?.images));
-console.log(
-  "compositionImage type:",
-  typeof req.body?.images?.compositionImage
-);
-console.log(
-  "stageTypeImage type:",
-  typeof req.body?.images?.stageTypeImage
-);
-console.log("==========================================\n");
+  console.log("method:", req.method);
+  console.log("content-type:", req.headers["content-type"]);
+  console.log("body type:", typeof req.body);
+  console.log("body keys:", Object.keys(req.body || {}));
+  console.log("project:", Boolean(req.body?.project));
+  console.log("settings:", Boolean(req.body?.settings));
+  console.log("objects:", Array.isArray(req.body?.objects));
+  console.log("images:", Boolean(req.body?.images));
+  console.log(
+    "compositionImage type:",
+    typeof req.body?.images?.compositionImage
+  );
+  console.log(
+    "stageTypeImage type:",
+    typeof req.body?.images?.stageTypeImage
+  );
+  console.log("==========================================\n");
+
   const validationError = validateRenderRequest(req.body);
+
   if (validationError) {
-    return res.status(400).json({ error: validationError });
+    return res.status(400).json({
+      error: validationError,
+    });
   }
 
   const {
@@ -287,28 +406,34 @@ console.log("==========================================\n");
   } = req.body;
 
   console.log("\n========== ARTIST DEBUG ==========");
-    console.log("settings 전체:", settings);
-    console.log("artistCount:", settings.artistCount);
-    console.log("artistCount 타입:", typeof settings.artistCount);
-    console.log("==================================\n");
+  console.log("settings 전체:", settings);
+  console.log("artistCount:", settings.artistCount);
+  console.log(
+    "artistCount 타입:",
+    typeof settings.artistCount
+  );
+  console.log("==================================\n");
 
-  const referenceImages = Array.isArray(images.referenceImages)
+  const referenceImages = Array.isArray(
+    images.referenceImages
+  )
     ? images.referenceImages.filter(Boolean)
     : [];
 
- try {
-  console.log(
-    "[AI Render] artistCount received:",
-    settings.artistCount ?? null
-  );
+  try {
+    console.log(
+      "[AI Render] artistCount received:",
+      settings.artistCount ?? null
+    );
 
-  const frontPrompt = buildFrontPrompt({
-    project,
-    settings,
-    objects,
-    referenceCount: referenceImages.length,
-  });
+    const frontPrompt = buildFrontPrompt({
+      project,
+      settings,
+      objects,
+      referenceCount: referenceImages.length,
+    });
 
+    // 여기부터 기존 코드 그대로 계속
   // FRONT 프롬프트 확인
   console.log("\n========== FRONT PROMPT DEBUG ==========");
   console.log("artistCount:", settings.artistCount);
