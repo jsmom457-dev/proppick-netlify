@@ -175,7 +175,7 @@ async function generateEditedImage({ prompt, imageDataUrls, resultName }) {
     model: "gpt-image-2",
     image: uploads,
     prompt,
-    size: "768x768",
+    size: "1024x1024",
     quality: "low",
     output_format: "png",
     background: "opaque",
