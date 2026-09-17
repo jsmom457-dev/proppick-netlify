@@ -1,0 +1,156 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
+@import url("https://api.fontshare.com/v2/css?f[]=general-sans@600,700&display=swap");
+
+
+* {
+  box-sizing: border-box;
+}
+
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+
+  margin: 0;
+  padding: 0;
+}
+
+
+body {
+  font-family:
+    "Pretendard",
+    sans-serif;
+
+  background:
+    #ffffff;
+
+  color:
+    #1a1a22;
+}
+
+
+/*
+ * ==========================================
+ * FORM RESET
+ * ==========================================
+ */
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+
+button {
+  -webkit-tap-highlight-color:
+    transparent;
+
+  /*
+   * 브라우저 기본 버튼 스타일 제거
+   */
+
+  -webkit-appearance:
+    none;
+
+  appearance:
+    none;
+}
+
+
+/*
+ * ==========================================
+ * GLOBAL FOCUS RESET
+ * ==========================================
+ */
+
+button:focus,
+button:focus-visible,
+button:active,
+
+[role="button"]:focus,
+[role="button"]:focus-visible,
+[role="button"]:active,
+
+input[type="button"]:focus,
+input[type="button"]:focus-visible,
+input[type="button"]:active,
+
+input[type="submit"]:focus,
+input[type="submit"]:focus-visible,
+input[type="submit"]:active,
+
+input[type="reset"]:focus,
+input[type="reset"]:focus-visible,
+input[type="reset"]:active {
+  outline:
+    none !important;
+
+  outline-offset:
+    0 !important;
+
+  box-shadow:
+    none !important;
+
+  -webkit-box-shadow:
+    none !important;
+}
+
+
+/*
+ * ==========================================
+ * INPUT FOCUS RESET
+ * ==========================================
+ */
+
+input:focus,
+input:focus-visible,
+
+textarea:focus,
+textarea:focus-visible,
+
+select:focus,
+select:focus-visible {
+  outline:
+    none !important;
+
+  outline-offset:
+    0 !important;
+
+  box-shadow:
+    none !important;
+
+  -webkit-box-shadow:
+    none !important;
+}
+
+
+/*
+ * ==========================================
+ * LUCIDE / IMAGE RESET
+ * ==========================================
+ */
+
+img,
+svg {
+  outline:
+    none;
+}
+
+
+/*
+ * ==========================================
+ * DISABLED
+ * ==========================================
+ */
+
+button:disabled {
+  outline:
+    none !important;
+
+  box-shadow:
+    none !important;
+}
