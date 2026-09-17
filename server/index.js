@@ -29,25 +29,26 @@ const openai = new OpenAI({
 app.use(
   cors({
     origin(origin, callback) {
-      // curl, Postman 등 origin이 없는 요청 허용
+      // origin이 없는 서버 요청 허용
       if (!origin) {
         return callback(null, true);
       }
 
-      // 개발 중 localhost의 모든 포트 허용
+      // 로컬 개발 환경 허용
       const isLocalhost =
         /^http:\/\/localhost:\d+$/.test(origin) ||
         /^http:\/\/127\.0\.0\.1:\d+$/.test(origin);
 
-      if (isLocalhost) {
-        return callback(null, true);
-      }
+      // Netlify 배포 주소 허용
+      const isNetlify =
+        /^https:\/\/[a-zA-Z0-9-]+\.netlify\.app$/.test(origin);
 
-      // 실제 배포 주소가 있다면 허용
-      if (
+      // 별도로 지정한 배포 주소 허용
+      const isConfiguredOrigin =
         process.env.CLIENT_ORIGIN &&
-        origin === process.env.CLIENT_ORIGIN
-      ) {
+        origin === process.env.CLIENT_ORIGIN;
+
+      if (isLocalhost || isNetlify || isConfiguredOrigin) {
         return callback(null, true);
       }
 
@@ -55,8 +56,20 @@ app.use(
         new Error(`CORS blocked for origin: ${origin}`)
       );
     },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ],
   })
 );
 
