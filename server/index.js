@@ -160,7 +160,31 @@ function validateRenderRequest(body) {
 }
 
 app.post("/api/render-stage", async (req, res) => {
+  console.log("\n========== NETLIFY REQUEST DEBUG ==========");
+  console.log("method:", req.method);
+  console.log("url:", req.url);
+  console.log("content-type:", req.headers["content-type"]);
+  console.log("body type:", typeof req.body);
+  console.log("body keys:", Object.keys(req.body || {}));
+  console.log("has project:", Boolean(req.body?.project));
+  console.log("has settings:", Boolean(req.body?.settings));
+  console.log("has objects:", Array.isArray(req.body?.objects));
+  console.log("has images:", Boolean(req.body?.images));
+  console.log("===========================================\n");
+
   const validationError = validateRenderRequest(req.body);
+
+  if (validationError) {
+    console.error("[Render Validation]", validationError);
+
+    return res.status(400).json({
+      error: validationError,
+      debug: {
+        bodyType: typeof req.body,
+        bodyKeys: Object.keys(req.body || {}),
+      },
+    });
+  }
   if (validationError) {
     return res.status(400).json({ error: validationError });
   }
