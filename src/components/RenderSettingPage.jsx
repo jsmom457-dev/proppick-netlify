@@ -12,6 +12,7 @@ import {
 
 import { toPng } from "html-to-image";
 import { imageUrlToDataUrl } from "../api/imageData";
+import { uploadImageToCloudinary } from "../services/renderStorageService";
 
 import TopBar from "./TopBar";
 import Chip from "./Chip";
@@ -437,6 +438,28 @@ export default function RenderSettingPage({
           project?.stageType?.imageUrl
         );
 
+      /*
+       * Netlify Functions에는 큰 Base64 이미지를 직접 보내지 않습니다.
+       * 렌더 입력 이미지를 먼저 Cloudinary에 자동 업로드하고
+       * API에는 가벼운 URL만 전달합니다.
+       */
+      const renderInputFolder =
+        `proppick/render-inputs/${project?.id || "temporary"}/${Date.now()}`;
+
+      const [compositionUpload, stageTypeUpload] =
+        await Promise.all([
+          uploadImageToCloudinary({
+            dataUrl: compositionImage,
+            folder: renderInputFolder,
+            publicId: "composition",
+          }),
+          uploadImageToCloudinary({
+            dataUrl: stageTypeImage,
+            folder: renderInputFolder,
+            publicId: "stage-type",
+          }),
+        ]);
+
       const renderPayload = {
         project: {
           id:
@@ -506,8 +529,8 @@ export default function RenderSettingPage({
           ),
 
         images: {
-          compositionImage,
-          stageTypeImage,
+          compositionImage: compositionUpload.url,
+          stageTypeImage: stageTypeUpload.url,
         },
       };
 

@@ -102,16 +102,59 @@ function extensionForMime(mimeType) {
   return "png";
 }
 
-async function dataUrlToUpload(dataUrl, name) {
-  const { mimeType, buffer } = dataUrlToBuffer(dataUrl);
-  const extension = extensionForMime(mimeType);
+async function imageSourceToUpload(source, name) {
+  if (!source || typeof source !== "string") {
+    throw new Error("이미지 데이터가 없습니다.");
+  }
 
-  return toFile(buffer, `${name}.${extension}`, {
-    type: mimeType,
-  });
+  if (/^https?:\/\//i.test(source)) {
+    const response = await fetch(source);
+    if (!response.ok) {
+      throw new Error(`원격 이미지를 불러오지 못했습니다: ${response.status}`);
+    }
+
+    const mimeType =
+      response.headers.get("content-type")?.split(";")[0] || "image/png";
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const extension = extensionForMime(mimeType);
+
+    return toFile(buffer, `${name}.${extension}`, { type: mimeType });
+  }
+
+  const { mimeType, buffer } = dataUrlToBuffer(source);
+  const extension = extensionForMime(mimeType);
+  return toFile(buffer, `${name}.${extension}`, { type: mimeType });
 }
 
-async function generateEditedImage({ prompt, imageDataUrls }) {
+async function uploadGeneratedImageToCloudinary(dataUrl, publicId) {
+  const cloudName = process.env.VITE_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+
+  if (!cloudName || !uploadPreset) {
+    throw new Error("Netlify Cloudinary 환경변수가 설정되지 않았습니다.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", dataUrl);
+  formData.append("upload_preset", uploadPreset);
+  formData.append("folder", "proppick/netlify-render-results");
+  formData.append("public_id", publicId);
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+    { method: "POST", body: formData }
+  );
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`AI 결과 Cloudinary 업로드 실패: ${response.status} ${message}`);
+  }
+
+  const result = await response.json();
+  return result.secure_url;
+}
+
+async function generateEditedImage({ prompt, imageDataUrls, resultName }) {
   const validImages = imageDataUrls.filter(Boolean).slice(0, 16);
 
   if (!validImages.length) {
@@ -119,8 +162,8 @@ async function generateEditedImage({ prompt, imageDataUrls }) {
   }
 
   const uploads = await Promise.all(
-    validImages.map((dataUrl, index) =>
-      dataUrlToUpload(dataUrl, `render-input-${index + 1}`)
+    validImages.map((source, index) =>
+      imageSourceToUpload(source, `render-input-${index + 1}`)
     )
   );
 
@@ -132,9 +175,6 @@ async function generateEditedImage({ prompt, imageDataUrls }) {
     model: "gpt-image-2",
     image: uploads,
     prompt,
-    // 전시/프로토타입용 빠른 렌더 설정.
-    // 화면 표시 크기는 프론트엔드 레이아웃이 결정하므로,
-    // 생성 원본만 1024px로 낮춰 생성 시간을 줄입니다.
     size: "1024x1024",
     quality: "low",
     output_format: "png",
@@ -143,13 +183,18 @@ async function generateEditedImage({ prompt, imageDataUrls }) {
   });
 
   const base64 = response.data?.[0]?.b64_json;
-
   if (!base64) {
     console.error("[AI Render] Empty image response:", response);
     throw new Error("AI 이미지 결과가 반환되지 않았습니다.");
   }
 
-  return `data:image/png;base64,${base64}`;
+  // Netlify 응답에도 Base64를 싣지 않습니다. 결과를 Cloudinary에
+  // 저장한 뒤 URL만 브라우저로 반환하여 6MB response 제한을 피합니다.
+  const dataUrl = `data:image/png;base64,${base64}`;
+  return uploadGeneratedImageToCloudinary(
+    dataUrl,
+    `${resultName || "render"}-${Date.now()}`
+  );
 }
 
 function validateRenderRequest(body) {
@@ -160,31 +205,7 @@ function validateRenderRequest(body) {
 }
 
 app.post("/api/render-stage", async (req, res) => {
-  console.log("\n========== NETLIFY REQUEST DEBUG ==========");
-  console.log("method:", req.method);
-  console.log("url:", req.url);
-  console.log("content-type:", req.headers["content-type"]);
-  console.log("body type:", typeof req.body);
-  console.log("body keys:", Object.keys(req.body || {}));
-  console.log("has project:", Boolean(req.body?.project));
-  console.log("has settings:", Boolean(req.body?.settings));
-  console.log("has objects:", Array.isArray(req.body?.objects));
-  console.log("has images:", Boolean(req.body?.images));
-  console.log("===========================================\n");
-
   const validationError = validateRenderRequest(req.body);
-
-  if (validationError) {
-    console.error("[Render Validation]", validationError);
-
-    return res.status(400).json({
-      error: validationError,
-      debug: {
-        bodyType: typeof req.body,
-        bodyKeys: Object.keys(req.body || {}),
-      },
-    });
-  }
   if (validationError) {
     return res.status(400).json({ error: validationError });
   }
@@ -227,6 +248,7 @@ app.post("/api/render-stage", async (req, res) => {
 
   const front = await generateEditedImage({
     prompt: frontPrompt,
+    resultName: "front",
     imageDataUrls: [
       images.compositionImage,
       images.stageTypeImage,
@@ -252,6 +274,7 @@ app.post("/api/render-stage", async (req, res) => {
     const [side, top] = await Promise.all([
       generateEditedImage({
         prompt: sidePrompt,
+        resultName: "side",
         imageDataUrls: [
           front,
           images.compositionImage,
@@ -261,6 +284,7 @@ app.post("/api/render-stage", async (req, res) => {
       }),
       generateEditedImage({
         prompt: topPrompt,
+        resultName: "top",
         imageDataUrls: [
           front,
           images.compositionImage,

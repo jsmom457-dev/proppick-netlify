@@ -72,7 +72,7 @@ function validateCloudinaryConfig() {
  * data:image/png;base64,...
  * 형식을 그대로 Cloudinary file 필드로 전송할 수 있습니다.
  */
-async function uploadImageToCloudinary({
+export async function uploadImageToCloudinary({
   dataUrl,
   folder,
   publicId,
@@ -81,6 +81,23 @@ async function uploadImageToCloudinary({
     throw new Error(
       `Cloudinary에 업로드할 이미지가 없습니다: ${publicId}`
     );
+  }
+
+  // 이미 Cloudinary에 올라간 이미지는 다시 업로드하지 않습니다.
+  // Netlify 배포에서는 AI 요청/응답을 URL 기반으로 유지해
+  // Function의 6MB payload 제한을 피합니다.
+  if (
+    typeof dataUrl === "string" &&
+    /^https:\/\/res\.cloudinary\.com\//i.test(dataUrl)
+  ) {
+    return {
+      url: dataUrl,
+      publicId: publicId || null,
+      width: null,
+      height: null,
+      format: null,
+      bytes: null,
+    };
   }
 
   validateCloudinaryConfig();
