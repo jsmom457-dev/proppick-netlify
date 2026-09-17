@@ -205,6 +205,24 @@ function validateRenderRequest(body) {
 }
 
 app.post("/api/render-stage", async (req, res) => {
+  console.log("\n========== RENDER REQUEST DEBUG ==========");
+console.log("method:", req.method);
+console.log("content-type:", req.headers["content-type"]);
+console.log("body type:", typeof req.body);
+console.log("body keys:", Object.keys(req.body || {}));
+console.log("project:", Boolean(req.body?.project));
+console.log("settings:", Boolean(req.body?.settings));
+console.log("objects:", Array.isArray(req.body?.objects));
+console.log("images:", Boolean(req.body?.images));
+console.log(
+  "compositionImage type:",
+  typeof req.body?.images?.compositionImage
+);
+console.log(
+  "stageTypeImage type:",
+  typeof req.body?.images?.stageTypeImage
+);
+console.log("==========================================\n");
   const validationError = validateRenderRequest(req.body);
   if (validationError) {
     return res.status(400).json({ error: validationError });
