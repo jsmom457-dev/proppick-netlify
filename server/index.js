@@ -367,7 +367,7 @@ function normalizeRequestBody(body) {
   }
 }
 
-aapp.post("/api/render-stage", async (req, res) => {
+app.post("/api/render-stage", async (req, res) => {
   // Netlify에서 숫자 key 객체로 들어온 body를 정상 JSON으로 복구
   req.body = normalizeRequestBody(req.body);
 
