@@ -638,26 +638,29 @@ const styles = {
    * ======================================
    */
 
-  resultLayout: {
-    width: "100%",
-    padding: "24px 36px 0 32px",
-    display: "grid",
-    gridTemplateColumns:
-      "minmax(0, 1fr) 168px",
-    gap: 20,
-    boxSizing: "border-box",
-    alignItems: "start",
-  },
+resultLayout: {
+  width: "100%",
+  padding: "24px 36px 0 32px",
+
+  display: "grid",
+
+  // 좌측 결과 이미지 82vw가 아니라 화면에 맞춰 적당히 축소
+  gridTemplateColumns: "minmax(0, 82%) 168px",
+
+  // 메인 이미지 ↔ 우측 카드 간격
+  gap: 32,
+
+  boxSizing: "border-box",
+  alignItems: "start",
+},
 
   mainColumn: {
     minWidth: 0,
   },
 
- mainImageButton: {
+mainImageButton: {
   display: "block",
-
-  // 기존 100% → 82%
-  width: "82%",
+  width: "100%",
 
   aspectRatio: "16 / 8.45",
 
@@ -665,9 +668,7 @@ const styles = {
   overflow: "hidden",
   border: "none",
   borderRadius: 6,
-
   backgroundColor: "#F5F6F8",
-
   cursor: "pointer",
 },
 
@@ -704,17 +705,17 @@ const styles = {
     fontSize: 14,
   },
 
-  mainBottom: {
-    width: "100%",
-    minHeight: 52,
-    paddingTop: 14,
-    display: "grid",
-    gridTemplateColumns:
-      "1fr auto 1fr",
-    alignItems: "start",
-    boxSizing: "border-box",
-  },
+mainBottom: {
+  width: "100%",
+  minHeight: 52,
+  paddingTop: 14,
 
+  display: "grid",
+  gridTemplateColumns: "1fr auto 1fr",
+
+  alignItems: "start",
+  boxSizing: "border-box",
+},
   detailText: {
     gridColumn: 1,
     color: "#888888",
