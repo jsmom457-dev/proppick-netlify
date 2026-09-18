@@ -1,6 +1,10 @@
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.PROD ? "" : "http://localhost:3001");
+response = await fetch(`${API_BASE_URL}/api/render-stage`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(payload),
+});
 
 export async function renderStageWithAI(payload) {
   let response;
