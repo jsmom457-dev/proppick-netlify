@@ -653,22 +653,23 @@ const styles = {
     minWidth: 0,
   },
 
-  mainImageButton: {
-    display: "block",
-    width: "100%",
-    /*
-     * 기존 Figma 가로 폭은 유지하면서
-     * 세로만 아주 조금 줄인 비율
-     */
-    aspectRatio: "16 / 8.45",
-    padding: 0,
-    overflow: "hidden",
-    border: "none",
-    borderRadius: 6,
-    backgroundColor:
-      "#F5F6F8",
-    cursor: "pointer",
-  },
+ mainImageButton: {
+  display: "block",
+
+  // 기존 100% → 82%
+  width: "82%",
+
+  aspectRatio: "16 / 8.45",
+
+  padding: 0,
+  overflow: "hidden",
+  border: "none",
+  borderRadius: 6,
+
+  backgroundColor: "#F5F6F8",
+
+  cursor: "pointer",
+},
 
   mainImage: {
     display: "block",
