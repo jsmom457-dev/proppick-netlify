@@ -4,20 +4,17 @@ import dotenv from "dotenv";
 import OpenAI, { toFile } from "openai";
 
 import {
-  buildAssetPlanningPrompt,
-  buildSingleViewPrompt,
-} from "./prompts/assetPrompts.js";
-
-import {
   buildFrontPrompt,
   buildSidePrompt,
   buildTopPrompt,
 } from "./promptBuilder.js";
 
+
 dotenv.config();
 
+
 /* =========================================================
-   APP / SERVER
+   APP
 ========================================================= */
 
 const app = express();
@@ -28,9 +25,11 @@ const PORT = Number(
   3001
 );
 
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
 
 /* =========================================================
    CORS
@@ -39,21 +38,17 @@ const openai = new OpenAI({
 app.use(
   cors({
     origin(origin, callback) {
-      // 서버 간 요청 / Postman 등
       if (!origin) {
         return callback(null, true);
       }
 
-      // 로컬 개발
       const isLocalhost =
         /^http:\/\/localhost:\d+$/.test(origin) ||
         /^http:\/\/127\.0\.0\.1:\d+$/.test(origin);
 
-      // Netlify 배포 주소
       const isNetlify =
         /^https:\/\/[a-zA-Z0-9-]+\.netlify\.app$/.test(origin);
 
-      // 환경변수로 직접 지정한 프론트 주소
       const isConfiguredOrigin =
         process.env.CLIENT_ORIGIN &&
         origin === process.env.CLIENT_ORIGIN;
@@ -89,17 +84,16 @@ app.use(
   })
 );
 
-/*
- * 렌더 요청에는 여러 이미지 URL/Data URL이 포함될 수 있음
- */
+
 app.use(
   express.json({
     limit: "80mb",
   })
 );
 
+
 /* =========================================================
-   HEALTH CHECK
+   HEALTH
 ========================================================= */
 
 app.get("/api/health", (_req, res) => {
@@ -109,23 +103,172 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+
+/* =========================================================
+   BODY NORMALIZER
+========================================================= */
+
+function normalizeRequestBody(body) {
+  try {
+    /*
+     * 이미 정상적인 객체
+     */
+    if (
+      body &&
+      typeof body === "object" &&
+      !Buffer.isBuffer(body) &&
+      !Array.isArray(body) &&
+      (
+        body.project ||
+        body.frontImage
+      )
+    ) {
+      return body;
+    }
+
+
+    /*
+     * 문자열
+     */
+    if (typeof body === "string") {
+      return JSON.parse(body);
+    }
+
+
+    /*
+     * Buffer
+     */
+    if (Buffer.isBuffer(body)) {
+      return JSON.parse(
+        body.toString("utf8")
+      );
+    }
+
+
+    /*
+     * Uint8Array
+     */
+    if (body instanceof Uint8Array) {
+      return JSON.parse(
+        Buffer
+          .from(body)
+          .toString("utf8")
+      );
+    }
+
+
+    /*
+     * Netlify/serverless-http에서
+     * 숫자 key 객체로 들어오는 경우
+     */
+    if (
+      body &&
+      typeof body === "object" &&
+      !Array.isArray(body)
+    ) {
+      const keys = Object.keys(body);
+
+      const numericKeys =
+        keys.length > 0 &&
+        keys.every((key) =>
+          /^\d+$/.test(key)
+        );
+
+      if (numericKeys) {
+        const sortedKeys = keys.sort(
+          (a, b) =>
+            Number(a) - Number(b)
+        );
+
+        const values = sortedKeys.map(
+          (key) => body[key]
+        );
+
+        let text = "";
+
+
+        if (
+          values.every(
+            (value) =>
+              typeof value === "number"
+          )
+        ) {
+          text = Buffer
+            .from(values)
+            .toString("utf8");
+        }
+
+        else if (
+          values.every(
+            (value) =>
+              typeof value === "string"
+          )
+        ) {
+          const byteStrings =
+            values.every(
+              (value) =>
+                /^\d+$/.test(value) &&
+                Number(value) >= 0 &&
+                Number(value) <= 255
+            );
+
+          if (byteStrings) {
+            text = Buffer
+              .from(
+                values.map(Number)
+              )
+              .toString("utf8");
+          } else {
+            text = values.join("");
+          }
+        }
+
+        else {
+          text = values
+            .map((value) => {
+              if (
+                typeof value === "number"
+              ) {
+                return String.fromCharCode(
+                  value
+                );
+              }
+
+              return String(
+                value ?? ""
+              );
+            })
+            .join("");
+        }
+
+
+        return JSON.parse(text);
+      }
+    }
+
+
+    return body;
+
+  } catch (error) {
+    console.error(
+      "[Body Normalize] FAILED:",
+      error
+    );
+
+    return body;
+  }
+}
+
+
 /* =========================================================
    IMAGE HELPERS
 ========================================================= */
 
 function dataUrlToBuffer(dataUrl) {
-  if (
-    !dataUrl ||
-    typeof dataUrl !== "string"
-  ) {
-    throw new Error(
-      "이미지 데이터가 없습니다."
+  const match =
+    dataUrl?.match(
+      /^data:([^;]+);base64,(.+)$/
     );
-  }
-
-  const match = dataUrl.match(
-    /^data:([^;]+);base64,(.+)$/
-  );
 
   if (!match) {
     throw new Error(
@@ -143,6 +286,7 @@ function dataUrlToBuffer(dataUrl) {
   };
 }
 
+
 function extensionForMime(mimeType) {
   if (mimeType === "image/jpeg") {
     return "jpg";
@@ -155,9 +299,11 @@ function extensionForMime(mimeType) {
   return "png";
 }
 
+
 /*
- * Cloudinary URL 또는 Data URL을
- * OpenAI 업로드 파일 형식으로 변환
+ * URL 또는 Data URL
+ * →
+ * OpenAI 업로드 파일
  */
 async function imageSourceToUpload(
   source,
@@ -168,20 +314,20 @@ async function imageSourceToUpload(
     typeof source !== "string"
   ) {
     throw new Error(
-      "이미지 데이터가 없습니다."
+      `이미지가 없습니다: ${name}`
     );
   }
 
-  /* -------------------------
-     HTTP / HTTPS IMAGE
-  ------------------------- */
 
+  /*
+   * Cloudinary 등 URL
+   */
   if (/^https?:\/\//i.test(source)) {
     const response = await fetch(source);
 
     if (!response.ok) {
       throw new Error(
-        `원격 이미지를 불러오지 못했습니다: ${response.status}`
+        `이미지를 불러오지 못했습니다: ${response.status}`
       );
     }
 
@@ -195,38 +341,34 @@ async function imageSourceToUpload(
       await response.arrayBuffer()
     );
 
-    const extension =
-      extensionForMime(mimeType);
-
     return toFile(
       buffer,
-      `${name}.${extension}`,
+      `${name}.${extensionForMime(mimeType)}`,
       {
         type: mimeType,
       }
     );
   }
 
-  /* -------------------------
-     DATA URL
-  ------------------------- */
 
+  /*
+   * Data URL
+   */
   const {
     mimeType,
     buffer,
   } = dataUrlToBuffer(source);
 
-  const extension =
-    extensionForMime(mimeType);
 
   return toFile(
     buffer,
-    `${name}.${extension}`,
+    `${name}.${extensionForMime(mimeType)}`,
     {
       type: mimeType,
     }
   );
 }
+
 
 /* =========================================================
    CLOUDINARY
@@ -242,6 +384,7 @@ async function uploadGeneratedImageToCloudinary(
   const uploadPreset =
     process.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
+
   if (
     !cloudName ||
     !uploadPreset
@@ -251,8 +394,8 @@ async function uploadGeneratedImageToCloudinary(
     );
   }
 
-  const formData =
-    new FormData();
+
+  const formData = new FormData();
 
   formData.append(
     "file",
@@ -274,6 +417,7 @@ async function uploadGeneratedImageToCloudinary(
     publicId
   );
 
+
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
     {
@@ -282,29 +426,34 @@ async function uploadGeneratedImageToCloudinary(
     }
   );
 
+
   if (!response.ok) {
     const message =
       await response.text();
 
     throw new Error(
-      `AI 결과 Cloudinary 업로드 실패: ${response.status} ${message}`
+      `Cloudinary 업로드 실패: ${response.status} ${message}`
     );
   }
+
 
   const result =
     await response.json();
 
+
   if (!result?.secure_url) {
     throw new Error(
-      "Cloudinary 이미지 URL이 반환되지 않았습니다."
+      "Cloudinary URL이 반환되지 않았습니다."
     );
   }
+
 
   return result.secure_url;
 }
 
+
 /* =========================================================
-   OPENAI IMAGE EDIT
+   OPENAI IMAGE GENERATION
 ========================================================= */
 
 async function generateEditedImage({
@@ -317,15 +466,18 @@ async function generateEditedImage({
       .filter(Boolean)
       .slice(0, 16);
 
+
   if (!validImages.length) {
     throw new Error(
-      "AI 렌더링에 사용할 기준 이미지가 없습니다."
+      `${resultName} 생성에 사용할 이미지가 없습니다.`
     );
   }
 
+
   console.log(
-    `[AI Render] Preparing ${resultName} image...`
+    `[AI Render] ${resultName}: 이미지 준비 시작`
   );
+
 
   const uploads =
     await Promise.all(
@@ -338,12 +490,14 @@ async function generateEditedImage({
       )
     );
 
+
   console.log(
-    `[AI Render] ${resultName}: Sending ${uploads.length} reference image(s) to gpt-image-2`
+    `[AI Render] ${resultName}: OpenAI 요청 시작 (${uploads.length} refs)`
   );
 
-  const startedAt =
-    Date.now();
+
+  const startedAt = Date.now();
+
 
   const response =
     await openai.images.edit({
@@ -364,38 +518,34 @@ async function generateEditedImage({
       n: 1,
     });
 
+
   console.log(
-    `[AI Render] ${resultName}: OpenAI finished in ${(
+    `[AI Render] ${resultName}: OpenAI 완료 ${(
       (Date.now() - startedAt) /
       1000
-    ).toFixed(1)}s`
+    ).toFixed(1)}초`
   );
+
 
   const base64 =
     response.data?.[0]?.b64_json;
 
-  if (!base64) {
-    console.error(
-      `[AI Render] ${resultName}: Empty image response`,
-      response
-    );
 
+  if (!base64) {
     throw new Error(
-      "AI 이미지 결과가 반환되지 않았습니다."
+      `${resultName} 이미지 결과가 없습니다.`
     );
   }
 
-  /*
-   * Base64를 브라우저에 직접 반환하지 않고
-   * Cloudinary에 저장한 후 URL만 반환
-   */
 
   const dataUrl =
     `data:image/png;base64,${base64}`;
 
+
   console.log(
-    `[AI Render] ${resultName}: Uploading to Cloudinary...`
+    `[AI Render] ${resultName}: Cloudinary 업로드 시작`
   );
+
 
   const imageUrl =
     await uploadGeneratedImageToCloudinary(
@@ -403,18 +553,21 @@ async function generateEditedImage({
       `${resultName}-${Date.now()}`
     );
 
+
   console.log(
-    `[AI Render] ${resultName}: Cloudinary upload complete`
+    `[AI Render] ${resultName}: 완료`
   );
+
 
   return imageUrl;
 }
 
+
 /* =========================================================
-   REQUEST VALIDATION
+   COMMON VALIDATION
 ========================================================= */
 
-function validateRenderRequest(body) {
+function validateBaseRequest(body) {
   if (!body?.project) {
     return "프로젝트 데이터가 필요합니다.";
   }
@@ -434,332 +587,34 @@ function validateRenderRequest(body) {
   return null;
 }
 
-/* =========================================================
-   BODY NORMALIZER
-========================================================= */
-
-function normalizeRequestBody(body) {
-  try {
-    /*
-     * 1. 이미 정상적인 JSON 객체
-     */
-
-    if (
-      body &&
-      typeof body === "object" &&
-      !Buffer.isBuffer(body) &&
-      !Array.isArray(body) &&
-      body.project
-    ) {
-      console.log(
-        "[Body Normalize] already normal JSON"
-      );
-
-      return body;
-    }
-
-    /*
-     * 2. 문자열
-     */
-
-    if (
-      typeof body === "string"
-    ) {
-      console.log(
-        "[Body Normalize] parsing string"
-      );
-
-      return JSON.parse(body);
-    }
-
-    /*
-     * 3. Buffer
-     */
-
-    if (
-      Buffer.isBuffer(body)
-    ) {
-      console.log(
-        "[Body Normalize] parsing Buffer"
-      );
-
-      const text =
-        body.toString("utf8");
-
-      return JSON.parse(text);
-    }
-
-    /*
-     * 4. Uint8Array
-     */
-
-    if (
-      body instanceof Uint8Array
-    ) {
-      console.log(
-        "[Body Normalize] parsing Uint8Array"
-      );
-
-      const text =
-        Buffer
-          .from(body)
-          .toString("utf8");
-
-      return JSON.parse(text);
-    }
-
-    /*
-     * 5. serverless-http / Netlify
-     *
-     * {
-     *   "0": ...,
-     *   "1": ...,
-     *   "2": ...
-     * }
-     */
-
-    if (
-      body &&
-      typeof body === "object" &&
-      !Array.isArray(body)
-    ) {
-      const keys =
-        Object.keys(body);
-
-      const numericKeys =
-        keys.length > 0 &&
-        keys.every(
-          (key) =>
-            /^\d+$/.test(key)
-        );
-
-      if (numericKeys) {
-        console.log(
-          "[Body Normalize] numeric-key body detected:",
-          keys.length
-        );
-
-        const sortedKeys =
-          keys.sort(
-            (a, b) =>
-              Number(a) -
-              Number(b)
-          );
-
-        const values =
-          sortedKeys.map(
-            (key) =>
-              body[key]
-          );
-
-        let text = "";
-
-        /*
-         * byte 숫자
-         */
-
-        if (
-          values.every(
-            (value) =>
-              typeof value ===
-                "number" &&
-              Number.isFinite(value)
-          )
-        ) {
-          text =
-            Buffer
-              .from(values)
-              .toString("utf8");
-        }
-
-        /*
-         * 문자열
-         */
-
-        else if (
-          values.every(
-            (value) =>
-              typeof value ===
-              "string"
-          )
-        ) {
-          const allByteStrings =
-            values.every(
-              (value) =>
-                /^\d+$/.test(
-                  value
-                ) &&
-                Number(value) >=
-                  0 &&
-                Number(value) <=
-                  255
-            );
-
-          if (allByteStrings) {
-            text =
-              Buffer
-                .from(
-                  values.map(
-                    Number
-                  )
-                )
-                .toString(
-                  "utf8"
-                );
-          } else {
-            text =
-              values.join("");
-          }
-        }
-
-        /*
-         * 혼합 형태
-         */
-
-        else {
-          text =
-            values
-              .map(
-                (value) => {
-                  if (
-                    typeof value ===
-                    "number"
-                  ) {
-                    return String.fromCharCode(
-                      value
-                    );
-                  }
-
-                  return String(
-                    value ?? ""
-                  );
-                }
-              )
-              .join("");
-        }
-
-        console.log(
-          "[Body Normalize] reconstructed length:",
-          text.length
-        );
-
-        const parsed =
-          JSON.parse(text);
-
-        console.log(
-          "[Body Normalize] SUCCESS:",
-          Object.keys(parsed)
-        );
-
-        return parsed;
-      }
-    }
-
-    console.warn(
-      "[Body Normalize] unsupported body format"
-    );
-
-    return body;
-  } catch (error) {
-    console.error(
-      "[Body Normalize] FAILED:",
-      error
-    );
-
-    return body;
-  }
-}
 
 /* =========================================================
-   STAGE RENDER API
+   FRONT
 ========================================================= */
 
 app.post(
-  "/api/render-stage",
+  "/api/render-stage/front",
   async (req, res) => {
-    /*
-     * Netlify/serverless-http에서 body가
-     * 숫자 key 객체로 들어오는 경우 복구
-     */
-
     req.body =
       normalizeRequestBody(
         req.body
       );
 
-    console.log(
-      "\n========== RENDER REQUEST =========="
-    );
-
-    console.log(
-      "method:",
-      req.method
-    );
-
-    console.log(
-      "content-type:",
-      req.headers[
-        "content-type"
-      ]
-    );
-
-    console.log(
-      "body keys:",
-      Object.keys(
-        req.body || {}
-      )
-    );
-
-    console.log(
-      "project:",
-      Boolean(
-        req.body?.project
-      )
-    );
-
-    console.log(
-      "settings:",
-      Boolean(
-        req.body?.settings
-      )
-    );
-
-    console.log(
-      "objects:",
-      Array.isArray(
-        req.body?.objects
-      )
-    );
-
-    console.log(
-      "images:",
-      Boolean(
-        req.body?.images
-      )
-    );
-
-    console.log(
-      "====================================\n"
-    );
 
     const validationError =
-      validateRenderRequest(
+      validateBaseRequest(
         req.body
       );
 
-    if (validationError) {
-      console.error(
-        "[Render Validation]",
-        validationError
-      );
 
+    if (validationError) {
       return res
         .status(400)
         .json({
-          error:
-            validationError,
+          error: validationError,
         });
     }
+
 
     const {
       project = {},
@@ -768,27 +623,27 @@ app.post(
       images = {},
     } = req.body;
 
+
     const referenceImages =
       Array.isArray(
         images.referenceImages
       )
-        ? images.referenceImages.filter(
-            Boolean
-          )
+        ? images.referenceImages.filter(Boolean)
         : [];
+
 
     try {
       console.log(
-        "[AI Render] artistCount:",
-        settings.artistCount ??
-          null
+        "\n========== FRONT REQUEST =========="
       );
 
-      /* =====================================================
-         1. FRONT
-      ===================================================== */
+      console.log(
+        "artistCount:",
+        settings.artistCount
+      );
 
-      const frontPrompt =
+
+      const prompt =
         buildFrontPrompt({
           project,
           settings,
@@ -798,26 +653,12 @@ app.post(
             referenceImages.length,
         });
 
-      console.log(
-        "\n========== FRONT GENERATION =========="
-      );
 
-      console.log(
-        "artistCount:",
-        settings.artistCount
-      );
-
-      console.log(
-        "[AI Render] Starting FRONT..."
-      );
-
-      const front =
+      const result =
         await generateEditedImage({
-          prompt:
-            frontPrompt,
+          prompt,
 
-          resultName:
-            "front",
+          resultName: "front",
 
           imageDataUrls: [
             images.compositionImage,
@@ -826,21 +667,105 @@ app.post(
           ],
         });
 
+
       console.log(
-        "[AI Render] FRONT complete:",
-        front
+        "========== FRONT COMPLETE ==========\n"
       );
 
-      /*
-       * Front 결과가 이후 Side / Top의
-       * canonical design이 됨.
-       */
 
-      /* =====================================================
-         2. SIDE / TOP PROMPTS
-      ===================================================== */
+      return res
+        .status(201)
+        .json({
+          result,
+          prompt,
+          view: "front",
+        });
 
-      const sidePrompt =
+    } catch (error) {
+      console.error(
+        "[FRONT ERROR]",
+        error
+      );
+
+
+      return res
+        .status(
+          typeof error?.status === "number"
+            ? error.status
+            : 500
+        )
+        .json({
+          error:
+            error?.message ||
+            "Front 생성에 실패했습니다.",
+        });
+    }
+  }
+);
+
+
+/* =========================================================
+   SIDE
+========================================================= */
+
+app.post(
+  "/api/render-stage/side",
+  async (req, res) => {
+    req.body =
+      normalizeRequestBody(
+        req.body
+      );
+
+
+    const validationError =
+      validateBaseRequest(
+        req.body
+      );
+
+
+    if (validationError) {
+      return res
+        .status(400)
+        .json({
+          error: validationError,
+        });
+    }
+
+
+    const {
+      project = {},
+      settings = {},
+      objects = [],
+      images = {},
+      frontImage,
+    } = req.body;
+
+
+    if (!frontImage) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Side 생성에는 Front 이미지가 필요합니다.",
+        });
+    }
+
+
+    const referenceImages =
+      Array.isArray(
+        images.referenceImages
+      )
+        ? images.referenceImages.filter(Boolean)
+        : [];
+
+
+    try {
+      console.log(
+        "\n========== SIDE REQUEST =========="
+      );
+
+
+      const prompt =
         buildSidePrompt({
           project,
           settings,
@@ -850,7 +775,120 @@ app.post(
             referenceImages.length,
         });
 
-      const topPrompt =
+
+      const result =
+        await generateEditedImage({
+          prompt,
+
+          resultName: "side",
+
+          imageDataUrls: [
+            frontImage,
+            images.compositionImage,
+            images.stageTypeImage,
+            ...referenceImages,
+          ],
+        });
+
+
+      console.log(
+        "========== SIDE COMPLETE ==========\n"
+      );
+
+
+      return res
+        .status(201)
+        .json({
+          result,
+          prompt,
+          view: "side",
+        });
+
+    } catch (error) {
+      console.error(
+        "[SIDE ERROR]",
+        error
+      );
+
+
+      return res
+        .status(
+          typeof error?.status === "number"
+            ? error.status
+            : 500
+        )
+        .json({
+          error:
+            error?.message ||
+            "Side 생성에 실패했습니다.",
+        });
+    }
+  }
+);
+
+
+/* =========================================================
+   TOP
+========================================================= */
+
+app.post(
+  "/api/render-stage/top",
+  async (req, res) => {
+    req.body =
+      normalizeRequestBody(
+        req.body
+      );
+
+
+    const validationError =
+      validateBaseRequest(
+        req.body
+      );
+
+
+    if (validationError) {
+      return res
+        .status(400)
+        .json({
+          error: validationError,
+        });
+    }
+
+
+    const {
+      project = {},
+      settings = {},
+      objects = [],
+      images = {},
+      frontImage,
+    } = req.body;
+
+
+    if (!frontImage) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Top 생성에는 Front 이미지가 필요합니다.",
+        });
+    }
+
+
+    const referenceImages =
+      Array.isArray(
+        images.referenceImages
+      )
+        ? images.referenceImages.filter(Boolean)
+        : [];
+
+
+    try {
+      console.log(
+        "\n========== TOP REQUEST =========="
+      );
+
+
+      const prompt =
         buildTopPrompt({
           project,
           settings,
@@ -860,336 +898,60 @@ app.post(
             referenceImages.length,
         });
 
-      console.log(
-        "\n========== SIDE + TOP GENERATION =========="
-      );
+
+      const result =
+        await generateEditedImage({
+          prompt,
+
+          resultName: "top",
+
+          imageDataUrls: [
+            frontImage,
+            images.compositionImage,
+            images.stageTypeImage,
+            ...referenceImages,
+          ],
+        });
+
 
       console.log(
-        "[AI Render] Starting SIDE and TOP in parallel..."
+        "========== TOP COMPLETE ==========\n"
       );
 
-      /* =====================================================
-         3. SIDE + TOP
-      ===================================================== */
-
-      const [
-        side,
-        top,
-      ] =
-        await Promise.all([
-          generateEditedImage({
-            prompt:
-              sidePrompt,
-
-            resultName:
-              "side",
-
-            imageDataUrls: [
-              front,
-              images.compositionImage,
-              images.stageTypeImage,
-              ...referenceImages,
-            ],
-          }),
-
-          generateEditedImage({
-            prompt:
-              topPrompt,
-
-            resultName:
-              "top",
-
-            imageDataUrls: [
-              front,
-              images.compositionImage,
-              images.stageTypeImage,
-              ...referenceImages,
-            ],
-          }),
-        ]);
-
-      console.log(
-        "[AI Render] SIDE complete:",
-        side
-      );
-
-      console.log(
-        "[AI Render] TOP complete:",
-        top
-      );
-
-      console.log(
-        "\n========== RENDER COMPLETE ==========\n"
-      );
-
-      /* =====================================================
-         RESPONSE
-      ===================================================== */
 
       return res
         .status(201)
         .json({
-          results: {
-            front,
-            side,
-            top,
-          },
-
-          prompts: {
-            front:
-              frontPrompt,
-
-            side:
-              sidePrompt,
-
-            top:
-              topPrompt,
-          },
-
-          generatedAt:
-            new Date()
-              .toISOString(),
+          result,
+          prompt,
+          view: "top",
         });
+
     } catch (error) {
       console.error(
-        "\n========== STAGE RENDER ERROR =========="
-      );
-
-      console.error(
+        "[TOP ERROR]",
         error
       );
 
-      console.error(
-        "message:",
-        error?.message
-      );
-
-      console.error(
-        "status:",
-        error?.status
-      );
-
-      console.error(
-        "========================================\n"
-      );
 
       return res
         .status(
-          typeof error?.status ===
-            "number"
+          typeof error?.status === "number"
             ? error.status
             : 500
         )
         .json({
           error:
             error?.message ||
-            "AI 무대 렌더링 중 오류가 발생했습니다.",
+            "Top 생성에 실패했습니다.",
         });
     }
   }
 );
 
-/* =========================================================
-   ASSET GENERATION
-========================================================= */
-
-function validateAssetRequest(
-  body
-) {
-  if (!body?.projectId) {
-    return "projectId가 필요합니다.";
-  }
-
-  if (!body?.categoryId) {
-    return "categoryId가 필요합니다.";
-  }
-
-  if (
-    !body?.keywords?.space
-  ) {
-    return "공간 키워드가 필요합니다.";
-  }
-
-  if (
-    !body?.keywords?.mood
-  ) {
-    return "분위기 키워드가 필요합니다.";
-  }
-
-  if (
-    !body?.keywords?.style
-  ) {
-    return "조형 스타일 키워드가 필요합니다.";
-  }
-
-  return null;
-}
-
-async function createAssetPlan({
-  categoryId,
-  keywords,
-}) {
-  const prompt =
-    buildAssetPlanningPrompt({
-      categoryId,
-      keywords,
-    });
-
-  const response =
-    await openai.responses.create({
-      model: "gpt-5.6",
-
-      input: prompt,
-
-      text: {
-        format: {
-          type: "json_schema",
-
-          name: "asset_plan",
-
-          strict: true,
-
-          schema: {
-            type: "object",
-
-            additionalProperties:
-              false,
-
-            properties: {
-              assets: {
-                type: "array",
-
-                minItems: 1,
-
-                maxItems: 1,
-
-                items: {
-                  type:
-                    "object",
-
-                  additionalProperties:
-                    false,
-
-                  properties: {
-                    id: {
-                      type:
-                        "string",
-                    },
-
-                    name: {
-                      type:
-                        "string",
-                    },
-
-                    koreanName: {
-                      type:
-                        "string",
-                    },
-
-                    description: {
-                      type:
-                        "string",
-                    },
-
-                    promptDetail: {
-                      type:
-                        "string",
-                    },
-                  },
-
-                  required: [
-                    "id",
-                    "name",
-                    "koreanName",
-                    "description",
-                    "promptDetail",
-                  ],
-                },
-              },
-            },
-
-            required: [
-              "assets",
-            ],
-          },
-        },
-      },
-    });
-
-  const parsed =
-    JSON.parse(
-      response.output_text
-    );
-
-  if (
-    !Array.isArray(
-      parsed.assets
-    ) ||
-    parsed.assets.length !==
-      1
-  ) {
-    throw new Error(
-      "AI 소품 계획 결과 형식이 올바르지 않습니다."
-    );
-  }
-
-  return parsed.assets;
-}
-
-async function generateAssetView({
-  categoryId,
-  keywords,
-  assetPlan,
-  view,
-}) {
-  const prompt =
-    buildSingleViewPrompt({
-      categoryId,
-      keywords,
-      assetPlan,
-      view,
-    });
-
-  const result =
-    await openai.images.generate({
-      model:
-        "gpt-image-2",
-
-      prompt,
-
-      size:
-        "1024x1024",
-
-      quality:
-        "low",
-
-      output_format:
-        "png",
-
-      background:
-        "opaque",
-
-      n: 1,
-    });
-
-  const base64 =
-    result.data?.[0]?.b64_json;
-
-  if (!base64) {
-    throw new Error(
-      `${assetPlan.name}의 ${view} 이미지가 반환되지 않았습니다.`
-    );
-  }
-
-  return {
-    view,
-    prompt,
-    base64,
-  };
-}
 
 /* =========================================================
-   ERROR HANDLER
+   EXPRESS ERROR
 ========================================================= */
 
 app.use(
@@ -1204,11 +966,11 @@ app.use(
       error
     );
 
-    if (
-      res.headersSent
-    ) {
+
+    if (res.headersSent) {
       return;
     }
+
 
     res
       .status(500)
@@ -1220,15 +982,10 @@ app.use(
   }
 );
 
-/* =========================================================
-   SERVER START
-========================================================= */
 
-/*
- * 로컬 / Render에서는 서버 실행.
- * Netlify Function에서는 serverless-http가 app을 사용하므로
- * 직접 listen하지 않음.
- */
+/* =========================================================
+   START
+========================================================= */
 
 if (!process.env.NETLIFY) {
   app.listen(
@@ -1241,5 +998,6 @@ if (!process.env.NETLIFY) {
     }
   );
 }
+
 
 export default app;
