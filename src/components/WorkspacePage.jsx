@@ -816,27 +816,24 @@ export default function WorkspacePage({
           }
         >
           <StageDropdown
-            stageTypes={
-              stageTypes
-            }
-            selectedStage={
-              project?.stageType
-            }
-            onSelect={(
-              stage
-            ) => {
-              setProject(
-                (
-                  previous
-                ) => ({
-                  ...previous,
+  stageTypes={stageTypes}
+  selectedStage={project?.stageType ?? null}
+  onSelect={(stage) => {
+    if (!stage) return;
 
-                  stageType:
-                    stage,
-                })
-              );
-            }}
-          />
+    console.log(
+      "[Stage Type] selected:",
+      stage
+    );
+
+    setProject?.((previous) => ({
+      ...(previous || {}),
+      stageType: stage,
+    }));
+
+    setSelectedObjectId?.(null);
+  }}
+/>
 
 
           <Button
